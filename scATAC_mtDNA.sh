@@ -6,13 +6,14 @@
 bedtools maskfasta -fi genome.fa -bed mtDNA_blacklist.bed -fo masked_genome.fa
 
 # Generate a config file including this new reference, this has the format:
-#{
-#    organism: "human"
-#    genome: ["GRCh38"]
-#    input_fasta: ["/path/to/GRCh38/masked_genome.fa"]
-#    input_gtf: ["/path/to/gencode/Homo_sapiens.GRCh38.112.gtf"]
-#    non_nuclear_contigs: ["MT"]
-#    input_motifs: "/path/to/jaspar/motifs.pfm"}
+{
+    organism: "human"
+    genome: ["GRCh38"]
+    input_fasta: ["/path/to/GRCh38/masked_genome.fa"]
+    input_gtf: ["/path/to/gencode/Homo_sapiens.GRCh38.112.gtf"]
+    non_nuclear_contigs: ["MT"]
+    input_motifs: "/path/to/jaspar/motifs.pfm"
+    }
 
 #Update CellRanger-atac reference
 
