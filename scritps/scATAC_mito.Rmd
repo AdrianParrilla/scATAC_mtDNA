@@ -1,0 +1,1272 @@
+---
+title: "scATAC_mito.Rmd"
+author: "Adrian Parrilla"
+date: "2025-02-06"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(hdf5r)
+library(Seurat)
+library(Signac)
+library(EnsDb.Hsapiens.v86)
+library(GenomeInfoDb)
+library(biovizBase)
+library(GenomicRanges)
+library(AnnotationHub)
+library(ggplot2)
+library(harmony)
+library(writexl)
+library(clusterProfiler)
+library(enrichplot)
+library(org.Hs.eg.db)
+library(tidyverse)
+library(readxl)
+library(ggrepel)
+```
+
+Load human gene annotation
+
+```{r warning=FALSE}
+ah <- AnnotationHub()
+ensdb_latest <- ah[["AH116291"]]
+annotations <- GetGRangesFromEnsDb(ensdb = ensdb_latest)
+genome(annotations) <- "hg38"
+EnsDb::dbDisconnect(ensdb_latest)
+```
+
+```{r}
+data.dir <- "V:/Team_LabNotebooks/TDA/Shared Experiments/1_Old vs Young/1.4_23.5.2024_Old vs Young 4/1.4-1.7_EV Isolation & Characterization/1.4-1.7_Old vs Young_scATAC-Seq/Data/"
+
+data.dir.Y3 <- "V:/Team_LabNotebooks/TDA/Iris_Experiments/8_ATAC-Seq/8.3_2.5.2024_scATAC-Seq Trial.1/scATAC-Seq Analysis/cellranger_output/"
+
+```
+
+Specify variants of interest
+```{r}
+# All Clonal Variants: 
+###################### Sample 1
+#Old - 1
+alleles.view.O1 <- c(
+  "73A>G", "146T>C", "153A>G", "263A>G", "750A>G", "1438A>G", "3010G>A", "4769A>G", "8860A>G", "9548G>A",
+  "10034T>C", "10238T>C", "10398A>G", "11719G>A", "12501G>A", "12705C>T", "13780A>G", "14766C>T", "15043G>A", "15326A>G", "16519T>C")
+# Old - 2
+alleles.view.O2 <- c(
+  "73A>G", "199T>C", "204T>C", "250T>C", "263A>G", "750A>G", "1393G>A", "1438A>G", "1719G>A", 
+  "2706A>G", "2857T>C", "4529A>T", "4769A>G", "7028C>T", "8251G>A", "8519G>A", "8860A>G", 
+  "10034T>C", "10238T>C", "10398A>G", "11719G>A", "12501G>A", "12705C>T", "13780A>G", 
+  "14766C>T", "15043G>A", "15326A>G", "15924A>G", "16129G>A", "16223C>T", "16391G>A", "16519T>C")
+# Young - 1
+alleles.view.Y1 <- c(
+  "73A>G", "263A>G", "750A>G", "1438A>G", "3010G>A",
+  "4769A>G", "6365T>C", "8860A>G", "15326A>G", "16162A>G",
+  "16209T>C", "16519T>C")
+
+###################### Sample 2
+# Old - 3
+alleles.view.O3 <- c(
+  "73A>G", "150C>T", "189A>G", "194C>T", "195T>C", "204T>C", "207G>A", "263A>G", "542C>T", "709G>A", 
+  "750A>G", "1243T>C", "1438A>G", "2706A>G", "3337G>A", "3393C>T", "3505A>G", "4769A>G", "5046G>A", "5460G>A", 
+  "6528C>T", "7028C>T", "8251G>A", "8860A>G", "8994G>A", "10034T>C", "10097A>G", "10166T>C", "10398A>G", 
+  "11674C>T", "11719G>A", "11947A>G", "12414T>C", "12705C>T", "13780A>G", "14766C>T", "15326A>G", 
+  "15775A>G", "15884G>C", "16223C>T", "16292C>T", "16362T>C", "16519T>C")
+# Old - 4
+alleles.view.O4 <- c(
+  "73A>G", "263A>G", "709G>A", "750A>G", "930G>A", "1438A>G", "1888G>A", "2706A>G", "3882G>A", "4216T>C",
+  "4769A>G", "4917A>G", "5029T>C", "5147G>A", "5527A>G", "7028C>T", "8697G>A", "8860A>G", "9254A>G", "9835T>C",
+  "10032A>G", "10463T>C", "11251A>G", "11467A>G", "11719G>A", "11812A>G", "12308A>G", "12372G>A", "12473T>C", "13189A>G",
+  "13368G>A", "13617T>C", "14233A>G", "14593A>G", "14766C>T", "14793A>G", "14905G>A", "15326A>G", "15452C>A", "15607A>G",
+  "15928G>A", "16126T>C", "16164A>G", "16172T>C", "16192C>T", "16256C>T", "16270C>T", "16294C>T", "16304T>C", "16519T>C",
+  "16526G>A")
+
+# Young - 2
+alleles.view.Y2 <- c(
+  "73A>G", "207G>A", "263A>G", "499G>A", "750A>G", "827A>G", "1438A>G", "2706A>G", "4769A>G", "4820G>A", 
+  "6023G>A", "6216T>C", "6413T>C", "7028C>T", "8860A>G", "9305G>A", "11719G>A", "13590G>A", "14766C>T", "15326A>G", 
+  "15535C>T", "16136T>C", "16162A>G", "16182A>C", "16183A>C", "16189T>C", "16209T>C", "16217T>C", "16261C>T", "16300A>G", 
+  "16519T>C")
+```
+
+```{r}
+variants.interest <- unique(c(alleles.view.O1, alleles.view.O2, alleles.view.Y1,
+                                     alleles.view.O3, alleles.view.O4, alleles.view.Y2))
+
+rm(alleles.view.O1, alleles.view.O2, alleles.view.O3, alleles.view.O4, alleles.view.Y1, alleles.view.Y2)
+```
+
+
+A function to pre-process multiple samples and integrate mgatk data in the Seurat object
+```{r}
+import_atac <- function(count_path, meta_path, fragment_path, mgatk_path, dir_name){
+  
+  if (!dir.exists(dir_name)) {
+  dir.create(dir_name, recursive = TRUE)
+    }
+  
+  counts <- Read10X_h5(filename = count_path)
+  
+  meta <- read.csv(
+  file = meta_path,
+  header = TRUE,
+  row.names = 1)
+  
+  
+  chrom_assay <- CreateChromatinAssay(
+  counts = counts,
+  sep = c(":", "-"),
+  fragments = fragment_path,
+  min.cells = 10,
+  min.features = 200
+  )
+  
+  data <- CreateSeuratObject(
+    counts = chrom_assay,
+    assay = "peaks",
+    meta.data = meta
+  )
+  
+  
+  mito_data <- ReadMGATK(dir = mgatk_path)
+  mito <- CreateAssayObject(counts = mito_data$counts)
+  mito <- subset(mito, cells = Cells(data))
+  
+  data[["mito"]] <- mito
+  data <- AddMetaData(data, metadata = mito_data$depth[Cells(mito), ], col.name = "mtDNA_depth")
+  
+  variable.sites <- IdentifyVariants(data, assay = "mito", refallele = mito_data$refallele)
+  variant_plot <- VariantPlot(variants = variable.sites)
+  
+  high.conf <- subset(
+  variable.sites, subset = n_cells_conf_detected >= 5 &
+    strand_correlation >= 0.65 &
+    vmr > 0.01
+  )
+  
+  comb.variant <- unique(c(high.conf$variant, variants.interest))
+  combined.high.conf <- data.frame(variant = comb.variant, stringsAsFactors = FALSE)
+  
+  data <- AlleleFreq(
+  object = data,
+  variants = combined.high.conf$variant,
+  assay = "mito"
+  )
+  
+  ggsave(filename = paste0(dir_name,"/vmr_strand_plot.PNG"), plot = variant_plot, width = 8, height = 6, dpi = 300)
+  write_xlsx(x = high.conf, path = paste0(dir_name,"/high_conf_variants.xlsx"))
+
+  
+  Annotation(data) <- annotations
+  
+  data <- NucleosomeSignal(object = data) 
+  
+  
+  data <- TSSEnrichment(object = data, fast = FALSE)
+  
+  data$blacklist_ratio <- data$blacklist_region_fragments / data$peak_region_fragments
+  
+  data$pct_reads_in_peaks <- data$peak_region_fragments / data$passed_filters * 100 
+  
+  data$nucleosome_group <- ifelse(data$nucleosome_signal > 1.5, 'NS > 1.5', 'NS < 1.5')
+
+  low_prf <- quantile(data[["peak_region_fragments"]]$peak_region_fragments, probs = 0.05)
+  hig_prf <- quantile(data[["peak_region_fragments"]]$peak_region_fragments, probs = 0.95)
+  low_prp <- quantile(data[["pct_reads_in_peaks"]]$pct_reads_in_peaks, probs = 0.05)
+  
+  hig_ns <- quantile(data[["nucleosome_signal"]]$nucleosome_signal, probs = 0.95)
+  
+  low_ts <- quantile(data[["TSS.enrichment"]]$TSS.enrichment, probs = 0.05)
+  
+  data <- subset(
+    x = data,
+    subset = peak_region_fragments > low_prf &
+      peak_region_fragments < hig_prf &
+      pct_reads_in_peaks > low_prp &
+      nucleosome_signal < hig_ns &
+      TSS.enrichment > low_ts &
+      mtDNA_depth >= 7
+  )
+  
+
+  return(data)
+}
+```
+
+
+Loading all the donors
+
+```{r}
+young.1 <- import_atac(paste0(data.dir, "Sample1_Donor1/raw_peak_bc_matrix.h5"),
+         paste0(data.dir, "Sample1_Donor1/singlecell.csv"),
+         paste0(data.dir, "Sample1_Donor1/fragments.tsv.gz"),
+         paste0(data.dir, "Sample1_Donor1/mgatk_output/"),
+         dir_name = "young.1_mgatk_plots")
+
+young.2 <- import_atac(paste0(data.dir, "Sample2_Donor2/raw_peak_bc_matrix.h5"),
+         paste0(data.dir, "Sample2_Donor2/singlecell.csv"),
+         paste0(data.dir, "Sample2_Donor2/fragments.tsv.gz"),
+         paste0(data.dir, "Sample2_Donor2/mgatk_output/"),
+         dir_name = "young.2_mgatk_plots")
+
+young.3 <- import_atac(paste0(data.dir.Y3, "raw_peak_bc_matrix.h5"),
+         paste0(data.dir.Y3, "singlecell.csv"),
+         paste0(data.dir.Y3, "fragments.tsv.gz"),
+         paste0(data.dir.Y3, "mgatk_output/"),
+         dir_name = "young.3_mgatk_plots")
+
+old.1 <- import_atac(paste0(data.dir, "Sample1_Donor0/raw_peak_bc_matrix.h5"),
+         paste0(data.dir, "Sample1_Donor0/singlecell.csv"),
+         paste0(data.dir, "Sample1_Donor0/fragments.tsv.gz"),
+         paste0(data.dir, "Sample1_Donor0/mgatk_output/"),
+         dir_name = "old.1_mgatk_plots")
+
+old.2 <- import_atac(paste0(data.dir, "Sample1_Donor2/raw_peak_bc_matrix.h5"),
+         paste0(data.dir, "Sample1_Donor2/singlecell.csv"),
+         paste0(data.dir, "Sample1_Donor2/fragments.tsv.gz"),
+         paste0(data.dir, "Sample1_Donor2/mgatk_output/"),
+         dir_name = "old.2_mgatk_plots")
+
+old.3 <- import_atac(paste0(data.dir, "Sample2_Donor0/raw_peak_bc_matrix.h5"),
+         paste0(data.dir, "Sample2_Donor0/singlecell.csv"),
+         paste0(data.dir, "Sample2_Donor0/fragments.tsv.gz"),
+         paste0(data.dir, "Sample2_Donor0/mgatk_output/"),
+         dir_name = "old.3_mgatk_plots")
+
+old.4 <- import_atac(paste0(data.dir, "Sample2_Donor1/raw_peak_bc_matrix.h5"),
+         paste0(data.dir, "Sample2_Donor1/singlecell.csv"),
+         paste0(data.dir, "Sample2_Donor1/fragments.tsv.gz"),
+         paste0(data.dir, "Sample2_Donor1/mgatk_output/"),
+         dir_name = "old.4_mgatk_plots")
+```
+
+Adding a new metadata column to distinguish them after combining
+```{r}
+young.1$dataset <- 'pbmcY1'
+young.2$dataset <- 'pbmcY2'
+young.3$dataset <- 'pbmcY3'
+old.1$dataset <- 'pbmcO1'
+old.2$dataset <- 'pbmcO2'
+old.3$dataset <- 'pbmcO3'
+old.4$dataset <- 'pbmcO4'
+```
+
+```{r}
+# Read info on mutations that mark producers
+producer.mut <- read_xlsx("Interesting_EV.mutations.xlsx", sheet = "Raw_Data")
+```
+
+Check which cells carry the interesting mutations
+```{r}
+# add binary mutation info
+add_mutation_info <- function(seurat_obj, producer_mut) {
+  obj_name <- deparse(substitute(seurat_obj))
+  
+  donor_mutations <- producer_mut %>%
+    filter(DONOR == obj_name) %>%
+    pull(variant)
+  
+  DefaultAssay(seurat_obj) <- "alleles"
+  
+  mutation_data <- GetAssayData(seurat_obj, assay = "alleles", layer = "data")[donor_mutations, ]
+  
+  # Create a logical vector indicating if each cell has any of the mutations
+  has_mutation <- colSums(mutation_data > 0) > 0
+  
+  # Add this information to the Seurat object's metadata
+  seurat_obj$mt.mutation <- has_mutation
+  
+  return(seurat_obj)
+}
+```
+
+```{r}
+old.1 <- add_mutation_info(old.1, producer.mut)
+old.2 <- add_mutation_info(old.2, producer.mut)
+old.3 <- add_mutation_info(old.3, producer.mut)
+old.4 <- add_mutation_info(old.4, producer.mut)
+
+young.1 <- add_mutation_info(young.1, producer.mut)
+young.2 <- add_mutation_info(young.2, producer.mut)
+young.3 <- add_mutation_info(young.3, producer.mut)
+```
+
+
+Save RDS objects before merging
+```{r}
+if (!dir.exists("RDS_objects")) {
+  dir.create("RDS_objects", recursive = TRUE)
+}
+
+for (object in grep("old|young", objects(), value = TRUE)) {
+  saveRDS(get(object), file = paste0("RDS_objects/", object, ".rds"))
+}
+```
+
+```{r}
+# old.1 <- readRDS("RDS_objects/old.1.rds")
+# old.2 <- readRDS("RDS_objects/old.2.rds")
+# old.3 <- readRDS("RDS_objects/old.3.rds")
+# old.4 <- readRDS("RDS_objects/old.4.rds")
+# 
+# young.1 <- readRDS("RDS_objects/young.1.rds")
+# young.2 <- readRDS("RDS_objects/young.2.rds")
+# young.3 <- readRDS("RDS_objects/old.4.rds")
+```
+
+```{r}
+rm(annotations)
+```
+
+
+Merge the objects
+```{r}
+data <- merge(
+  x = young.1,
+  y = list(young.2, young.3, old.1, old.2, old.3, old.4),
+  add.cell.ids = c("y1", "y2", "y3", "o1", "o2", "o3", "o4")
+)
+```
+
+```{r}
+rm(old.1, old.2, old.3, old.4, young.1, young.2, young.3)
+```
+
+QC plot across donors
+```{r}
+
+plots <- VlnPlot(
+  object = data, 
+  features = c('nCount_peaks', 'pct_reads_in_peaks', 
+               'nucleosome_signal', 'TSS.enrichment', "mtDNA_depth"),
+  pt.size = 0,
+  ncol = 3, 
+  alpha = 0.7,
+  group.by = 'dataset',
+  cols = c("#E6194B",  
+         "#3CB44B",  
+         "#0082C8",  
+         "#F58231",  
+         "#911EB4",  
+         "#FFD700",  
+         "#46F0F0")
+)
+
+# Modify all plots to remove x-axis label
+plots <- lapply(plots, function(p) p + xlab(""))
+
+# Display all modified plots
+patchwork::wrap_plots(plots, ncol = 3)
+
+```
+
+
+```{r}
+DefaultAssay(data) <- "peaks"
+
+data <- RunTFIDF(data)
+data <- FindTopFeatures(data, min.cutoff = 'q0')
+data <- RunSVD(data)
+data
+```
+
+```{r}
+DepthCor(data)
+```
+
+```{r}
+data <- RunUMAP(object = data, reduction = 'lsi', dims = 2:30)
+```
+
+```{r}
+data <- FindNeighbors(object = data, reduction = 'lsi', dims = 2:30)
+```
+
+```{r}
+data <- FindClusters(object = data, verbose = FALSE, algorithm = 3)
+```
+
+```{r}
+DimPlot(object = data, label = TRUE, group.by = "dataset")
+```
+
+```{r}
+data <- RunHarmony(object = data, group.by.vars = 'dataset', reduction.use = 'lsi', project.dim = FALSE)
+```
+
+```{r}
+data <- FindNeighbors(object = data, reduction = "harmony", dims = 2:30)
+data <- FindClusters(object = data, algorithm = 3, verbose = FALSE, cluster.name = "Harmony_clusters", resolution = 0.5)
+data <- RunUMAP(data, reduction = "harmony", dims = 2:30, reduction.name = "umap.harm", seed.use = 33)
+```
+
+```{r}
+DimPlot(data, reduction = "umap.harm", group.by = c('dataset',"Harmony_clusters"), pt.size = 0.1)
+```
+
+Infer gene activity
+```{r}
+gene.activities <- GeneActivity(data)
+```
+
+```{r}
+data[['RNA']] <- CreateAssayObject(counts = gene.activities)
+
+data <- NormalizeData(
+  object = data,
+  assay = 'RNA',
+  normalization.method = 'LogNormalize',
+  scale.factor = median(data$nCount_RNA)
+)
+```
+
+# Cluster annotation based on cell markers------------
+```{r}
+DefaultAssay(data) <- 'RNA'
+```
+
+```{r}
+# Monocytes
+FeaturePlot(
+  object = data,
+  features = c('MS4A7', 'CD14', 'TREM1', 'LYZ'),
+  reduction = "umap.harm",
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 2
+)
+```
+
+```{r}
+# B cells
+FeaturePlot(
+  object = data,
+  features = c('MS4A1', 'CD19', 'CD79A','TNFRSF17'),
+  reduction = "umap.harm",
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 2
+)
+```
+
+```{r}
+# NK cells
+
+FeaturePlot(
+  object = data,
+  features = c('NKG7', 'GNLY', 'NCAM1','FCGR3A'),
+  reduction = "umap.harm",
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 2
+)
+```
+
+
+```{r}
+# CD4 T cells
+FeaturePlot(
+  object = data,
+  features = c('CD4', 'TCF7','SELL','IL17A','CXCR5','IL21'),
+  reduction = "umap.harm",
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 2
+)
+```
+
+```{r}
+# CD8 T cells
+FeaturePlot(
+  object = data,
+  features = c('CD8A','CD3D', 'GZMB', 'IL17RE', 'CD101','IL21'),
+  reduction = "umap.harm",
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 2
+)
+```
+
+# Integrating with scRNA-seq data-----------
+```{r}
+# Load the pre-processed scRNA-seq data for PBMCs
+pbmc_rna <- readRDS("RDS_objects/pbmc_10k_v3.rds")
+pbmc_rna <- UpdateSeuratObject(pbmc_rna)
+```
+
+```{r}
+View(pbmc_rna@meta.data)
+```
+
+```{r}
+# Visualise clusters
+p1 <- DimPlot(data, reduction = 'umap.harm') + NoLegend() + ggtitle('scATAC-Seq')
+p2 <- DimPlot(pbmc_rna, reduction = 'umap', group.by = 'celltype', repel = TRUE, label = TRUE)+
+  ggtitle('scRNA-Seq') + NoLegend()
+
+p1 | p2
+```
+
+Transfer labels
+```{r}
+transfer.anchors <- FindTransferAnchors(reference = pbmc_rna,
+                                        query = data,
+                                        reduction = 'cca')
+```
+
+```{r}
+predicted.labels <- TransferData(anchorset = transfer.anchors,
+                                 refdata = pbmc_rna$celltype,
+                                 weight.reduction = data[['lsi']],
+                                 dims = 2:30)
+```
+
+```{r}
+data <- AddMetaData(object = data, metadata = predicted.labels)
+```
+
+```{r}
+View(data@meta.data)
+```
+
+```{r}
+plot1 <- DimPlot(data, 
+                 reduction = 'umap.harm',
+                 group.by = 'predicted.id',
+                 label = TRUE,
+                 repel = TRUE) + NoLegend() + ggtitle('scATAC-Seq')
+
+plot2 <- DimPlot(pbmc_rna, 
+                 reduction = 'umap',
+                 group.by = 'celltype',
+                 label = TRUE,
+                 repel = TRUE) + NoLegend() + ggtitle('scRNA-Seq')
+
+plot1 | plot2
+```
+
+
+
+
+
+Save annotated object
+```{r}
+saveRDS(data, file = ("C:/Users/parrilla/Desktop/Bioinformatics/scATAC/PCA_seurat/RDS_objects/combined_annot.rds"))
+```
+
+```{r}
+# data is very generic so I change the name to avoid confusions
+data_ATAC <- readRDS("RDS_objects/combined_annot.rds") 
+```
+
+```{r}
+DimPlot(data_ATAC, reduction = 'umap.harm',
+        group.by = 'predicted.id',
+        split.by = 'dataset',
+        label = FALSE,
+        repel = TRUE) + NoLegend() +labs(x= "UMAP.1", y= "UMAP.2") + ggtitle('')+
+  theme(
+    axis.ticks.y = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(),
+    panel.spacing = unit(2, "lines")
+  )
+```
+
+
+```{r}
+Idents(data_ATAC) <- "predicted.id"
+cells_interest <- WhichCells(data_ATAC, idents = c("pre-B cell"))
+
+DimPlot(data_ATAC, 
+        reduction = 'umap.harm',
+        group.by = 'predicted.id',
+        cells.highlight = cells_interest,
+        cols.highlight = "darkred", 
+        cols= "grey",
+        label = TRUE,
+        repel = TRUE) + NoLegend() + ggtitle('scATAC-Seq')
+```
+
+```{r}
+VlnPlot(data_ATAC, 'prediction.score.max', group.by = 'predicted.id')+ xlab("")
+```
+
+Identify the predicted.id values that have more than 20 cells
+```{r}
+predicted_id_counts <- table(data_ATAC$predicted.id)
+
+major_predicted_ids <- names(predicted_id_counts[predicted_id_counts > 20])
+data_ATAC <- data_ATAC[, data_ATAC$predicted.id %in% major_predicted_ids] # removing platelets
+```
+
+Adding a new column in the metadata to specify the groups
+```{r}
+data_ATAC$group <- with(data_ATAC, ifelse(grepl("pbmcY", data_ATAC$dataset), "young", "old"))
+```
+
+# Finding differentially accesible peaks across donors
+```{r}
+#remotes::install_github('immunogenomics/presto') # Need to configure a PAT in github first
+```
+
+```{r}
+DefaultAssay(data_ATAC) <- 'peaks'
+
+Idents(data_ATAC) <- "group"
+
+# DA peaks using wilcox 
+da_peaks <- FindMarkers(
+  object = data_ATAC,
+  ident.1 = "old",  
+  ident.2 = "young",
+  test.use = 'wilcox',
+  min.pct = 0.1
+)
+
+```
+
+LR
+```{r}
+# DA peaks using LR method
+DefaultAssay(data_ATAC) <- 'peaks'
+
+Idents(data_ATAC) <- "group"
+
+da_peaks_LR <- FindMarkers(
+  object = data_ATAC,
+  ident.1 = "old",  
+  ident.2 = "young",
+  min.pct = 0.05,   
+  test.use = "LR",  
+  latent.vars = "peak_region_fragments"  
+)
+```
+
+Closest feature Wilcox
+```{r}
+closest_genes <- ClosestFeature(data_ATAC, regions = rownames(da_peaks))
+
+da_peaks <- da_peaks[rownames(da_peaks) %in% closest_genes$query_region, ]
+
+da_peaks$closest_gene <- closest_genes$gene_name
+da_peaks$distance <- closest_genes$distance
+da_peaks$type <- closest_genes$type
+
+da_peaks <- da_peaks %>% rownames_to_column(var = "Granges")
+
+write_xlsx(x = da_peaks, path = "C:/Users/parrilla/Desktop/Bioinformatics/scATAC/PCA_seurat/results/da_peaks.xlsx")
+
+```
+
+Closest feature LR
+```{r}
+closest_genes_LR <- ClosestFeature(data_ATAC, regions = rownames(da_peaks_LR))
+
+da_peaks_LR <- da_peaks_LR[rownames(da_peaks_LR) %in% closest_genes_LR$query_region, ]
+
+da_peaks_LR$closest_genes_LR <- closest_genes_LR$gene_name
+da_peaks_LR$distance <- closest_genes_LR$distance
+da_peaks_LR$type <- closest_genes_LR$type
+
+da_peaks_LR <- da_peaks_LR %>% rownames_to_column(var = "Granges")
+
+write_xlsx(x = da_peaks_LR, path = "C:/Users/parrilla/Desktop/Bioinformatics/scATAC/PCA_seurat/results/da_peaks_LR.xlsx")
+
+```
+
+
+# Peak accessibility by gene across donors
+```{r}
+DefaultAssay(data_ATAC) <- 'peaks'
+
+#region_highlight<-(StringToGRanges(da_peaks$Granges[17]))
+
+# Check for gene name
+grep("B3GAT1",data_ATAC@assays$peaks@annotation$gene_name,value = TRUE)
+
+region_gene <- subsetByOverlaps(StringToGRanges(da_peaks_DE$Granges), LookupGeneCoords(data_ATAC, "KDM4C"))
+
+CoveragePlot(
+  object = data_ATAC,
+  region = region_gene,
+  extend.upstream = 12000,
+  extend.downstream = 2000,
+  region.highlight = region_gene,
+  group.by = "dataset"
+)
+```
+
+Plotting a specific gene
+```{r}
+plot1 <- VlnPlot(
+  object = data_ATAC,
+  features = GRangesToString(region_gene),
+  group.by = "dataset"
+)
+plot2 <- FeaturePlot(
+  object = data_ATAC,
+  reduction = "umap.harm",
+  features = GRangesToString(region_gene),
+  max.cutoff = 'q95'
+)
+
+plot1 | plot2
+```
+
+# GO analysis DA peaks-----------
+
+Filtering the DA peaks results
+```{r}
+da_peaks_DE <- subset(da_peaks, abs(avg_log2FC) > 1 & p_val_adj < 0.05)
+da_peaks_DE_LR <- subset(da_peaks_LR, abs(avg_log2FC) > 1 & p_val_adj < 0.05)
+```
+
+```{r}
+#da_peaks_LR <- read_xlsx("results/da_peaks_LR.xlsx")
+
+#da_peaks_DE_LR <- subset(da_peaks_LR, abs(avg_log2FC) > 1 & p_val_adj < 0.05)
+```
+
+```{r}
+up_old_vs_young_LR <- subset(da_peaks_DE_LR, avg_log2FC > 1)
+down_old_vs_young_LR <- subset(da_peaks_DE_LR, avg_log2FC < -1)
+```
+
+
+Running GO analysis on the DA peaks. We have to keep in mind that this are the genes closer to the DA peaks, in some cases the peaks can be in up or downstream regions.
+```{r}
+ego <- enrichGO(gene          = da_peaks_DE$closest_gene,
+                OrgDb         = 'org.Hs.eg.db',
+                ont           = "BP",
+                keyType       = "SYMBOL",
+                pAdjustMethod = "BH",   
+                qvalueCutoff = 0.05,
+                readable      = TRUE)
+
+dotplot(ego, showCategory=10)+
+  theme(axis.text.y = element_text(size = 10))
+```
+
+```{r}
+ego_LR<-enrichGO(gene         = da_peaks_DE_LR$closest_gene,
+                OrgDb         = 'org.Hs.eg.db',
+                ont           = "BP",
+                keyType       = "SYMBOL",
+                pAdjustMethod = "BH",   
+                qvalueCutoff  = 0.05,
+                readable      = TRUE)
+
+dotplot(ego_LR, showCategory=10)+
+  theme(axis.text.y = element_text(size = 10))
+```
+
+```{r}
+ego_LR_CC <-enrichGO(gene       = da_peaks_DE_LR$closest_gene,
+                OrgDb         = 'org.Hs.eg.db',
+                ont           = "CC",
+                keyType       = "SYMBOL",
+                pAdjustMethod = "BH",   
+                qvalueCutoff  = 0.1,
+                readable      = TRUE)
+
+dotplot(ego_LR_CC, showCategory=10)+
+  theme(axis.text.y = element_text(size = 10))
+```
+
+```{r}
+barplot(ego, showCategory = 10)+
+  theme(axis.text.y = element_text(size = 10))
+```
+
+```{r}
+barplot(ego_LR, showCategory = 10)+
+  theme(axis.text.y = element_text(size = 10))
+```
+
+```{r}
+cluster_summary <- data.frame(ego)
+write_xlsx(x = cluster_summary, path = "C:/Users/parrilla/Desktop/Bioinformatics/scATAC/PCA_seurat/results/ego_summary_Wilcox.xlsx")
+```
+
+```{r}
+cluster_summary_LR <- data.frame(ego_LR)
+write_xlsx(x = cluster_summary_LR, path = "C:/Users/parrilla/Desktop/Bioinformatics/scATAC/PCA_seurat/results/ego_summary_LR.xlsx")
+```
+
+```{r}
+ego_LR_up<-enrichGO(gene         = up_old_vs_young_LR$closest_gene,
+                OrgDb         = 'org.Hs.eg.db',
+                ont           = "BP",
+                keyType       = "SYMBOL",
+                pAdjustMethod = "BH",   
+                qvalueCutoff  = 0.05,
+                readable      = TRUE)
+
+dotplot(ego_LR_up, showCategory=10)+
+  theme(axis.text.y = element_text(size = 10))
+```
+
+```{r}
+ego_LR_up_CC <-enrichGO(gene         = up_old_vs_young_LR$closest_gene,
+                OrgDb         = 'org.Hs.eg.db',
+                ont           = "CC",
+                keyType       = "SYMBOL",
+                pAdjustMethod = "BH",   
+                qvalueCutoff  = 0.05,
+                readable      = TRUE)
+
+dotplot(ego_LR_up_CC, showCategory=10)+
+  theme(axis.text.y = element_text(size = 10))
+```
+
+```{r}
+ego_LR_down<-enrichGO(gene      = down_old_vs_young_LR$closest_gene,
+                OrgDb         = 'org.Hs.eg.db',
+                ont           = "BP",
+                keyType       = "SYMBOL",
+                pAdjustMethod = "BH",   
+                qvalueCutoff  = 0.05,
+                readable      = TRUE)
+
+dotplot(ego_LR_down, showCategory=10)+
+  theme(axis.text.y = element_text(size = 10))
+```
+
+```{r}
+ego_LR_down_cc <-enrichGO(gene      = down_old_vs_young_LR$closest_gene,
+                OrgDb         = 'org.Hs.eg.db',
+                ont           = "CC",
+                keyType       = "SYMBOL",
+                pAdjustMethod = "BH",   
+                qvalueCutoff  = 0.05,
+                readable      = TRUE)
+
+dotplot(ego_LR_down_cc, showCategory=10)+
+  theme(axis.text.y = element_text(size = 10))
+```
+
+Volcano Plot Wilcox
+
+```{r}
+theme_set(theme_classic(base_size = 20) +
+            theme(
+              axis.title.y = element_text(face = "bold", margin = margin(0,20,0,0), size = rel(1.1), color = 'black'),
+              axis.title.x = element_text(hjust = 0.5, face = "bold", margin = margin(20,0,0,0), size = rel(1.1), color = 'black'),
+              plot.title = element_text(hjust = 0.5)
+            ))
+```
+
+```{r}
+# Label DA peaks
+da_peaks <- da_peaks %>%
+  mutate(diffexpressed = case_when(
+    avg_log2FC > 2.5 & p_val_adj < 0.05  ~ "Up",
+    avg_log2FC < -2.5 & p_val_adj < 0.05 ~ "Down",
+    TRUE                                ~ "No"
+  ))
+
+
+#subset(da_peaks_DE, p_val_adj < 0.05 & abs(avg_log2FC) >1)$closest_gene
+top_genes <- head(da_peaks$closest_gene[order(da_peaks$p_val_adj)], 30)
+da_peaks$delabel <- ifelse(da_peaks$closest_gene %in% top_genes, da_peaks$closest_gene, NA)
+
+
+```
+
+Volcano Plot LR
+```{r}
+# Label DA peaks
+da_peaks_LR <- da_peaks_LR %>%
+  mutate(diffexpressed = case_when(
+    avg_log2FC > 1 & p_val_adj < 0.05  ~ "Up",
+    avg_log2FC < -1 & p_val_adj < 0.05 ~ "Down",
+    TRUE                                ~ "No"
+  ))
+
+
+#subset(da_peaks_DE, p_val_adj < 0.05 & abs(avg_log2FC) >1)$closest_gene
+top_genes <- head(da_peaks_LR$closest_gene[order(da_peaks_LR$p_val_adj)], 30)
+da_peaks_LR$delabel <- ifelse(da_peaks_LR$closest_gene %in% top_genes, da_peaks_LR$closest_gene, NA)
+
+
+```
+
+```{r}
+ggplot(data = da_peaks, aes(x = avg_log2FC, y = -log10(p_val_adj), col = diffexpressed, label = delabel)) +
+  geom_vline(xintercept = c(-1, 1), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') + 
+  geom_point(size = 2)+
+  scale_color_manual(values = c("#00AFBB", "grey", "#bb0c00"), 
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  ylim(0,240)+
+  labs(color = '', 
+       x = expression("log"[2]*"FC"), y = expression("-log"[10]*"p-value adj"))+
+  geom_text_repel(max.overlaps = 15)
+```
+
+```{r}
+ggplot(data = da_peaks_LR, aes(x = avg_log2FC, y = -log10(p_val_adj), col = diffexpressed, label = delabel)) +
+  geom_vline(xintercept = c(-1, 1), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') + 
+  geom_point(size = 2)+
+  scale_color_manual(values = c("#00AFBB", "grey", "#bb0c00"), 
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  labs(color = '', 
+       x = expression("log"[2]*"FC"), y = expression("-log"[10]*"p-value adj"))+
+  geom_text_repel(max.overlaps = 15)
+```
+
+# Cell proportions across donors
+```{r}
+cell_prop <- data_ATAC@meta.data %>% select("dataset","group","predicted.id") %>%
+  group_by(dataset, predicted.id) %>% summarise(Count = n(),.groups = "drop") %>% 
+  group_by(dataset) %>% mutate(Perct = Count/sum(Count)*100)
+
+ggplot(cell_prop, aes(fill=predicted.id, y= Count, x=dataset)) +
+  geom_bar(position="fill", stat="identity")+
+  xlab("")+
+  labs(fill='')+
+  theme_bw()+
+  theme(
+    axis.title.y = element_text(face = "bold", margin = margin(0,10,0,0), size = rel(1.1), color = 'black'),
+    axis.text.x = element_text(face = "bold", size = 12 )
+  )
+```
+
+```{r}
+write_xlsx(x = cell_prop, path = "C:/Users/parrilla/Desktop/Bioinformatics/scATAC/PCA_seurat/results/cell_proportions.xlsx")
+```
+
+
+# Finding differentially accesible peaks across mt mutations
+
+```{r}
+DimPlot(data_ATAC, 
+        reduction = 'umap.harm',
+        split.by = "dataset",
+        group.by = "mt.mutation",
+        ncol = 4,
+        cols = c("lightgrey", "darkred"),
+        na.value = "lightgrey"
+) + 
+  labs(x= "UMAP.1", y= "UMAP.2")+
+  ggtitle('Informative mtDNA mutations') +
+  theme(panel.spacing = unit(2, "lines"),  
+        strip.text.x = element_text(size = 12), 
+        axis.line.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.line.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_text(face = "bold", margin =  margin(0,20,0,0)),
+        axis.title.x = element_text(face = "bold", margin =  margin(0,20,0,0)),
+        plot.title = element_text(hjust = 0.5, margin =  margin(0,0,20,0))
+        )
+```
+
+Wilcox test
+```{r}
+DefaultAssay(data_ATAC) <- 'peaks'
+
+Idents(data_ATAC) <- "mt.mutation"
+
+# DA peaks using wilcox 
+da_peaks_mt_Wilcox <- FindMarkers(
+  object = data_ATAC,
+  ident.1 = "TRUE",  
+  ident.2 = "FALSE",
+  test.use = 'wilcox',
+  min.pct = 0.1
+)
+
+```
+
+LR test
+```{r}
+# DA peaks using LR method
+DefaultAssay(data_ATAC) <- 'peaks'
+
+Idents(data_ATAC) <- "mt.mutation"
+
+da_peaks_LR <- FindMarkers(
+  object = data_ATAC,
+  ident.1 = "TRUE",  
+  ident.2 = "FALSE",
+  min.pct = 0.05,   
+  test.use = "LR",  
+  latent.vars = "peak_region_fragments"  
+)
+```
+
+```{r}
+closest_genes_mt_Wilcox <- ClosestFeature(data_ATAC, regions = rownames(da_peaks_mt_Wilcox))
+
+da_peaks_mt_Wilcox <- da_peaks_mt_Wilcox[rownames(da_peaks_mt_Wilcox) %in% closest_genes_mt_Wilcox$query_region, ]
+
+da_peaks_mt_Wilcox$closest_gene <- closest_genes_mt_Wilcox$gene_name
+da_peaks_mt_Wilcox$distance <- closest_genes_mt_Wilcox$distance
+da_peaks_mt_Wilcox$type <- closest_genes_mt_Wilcox$type
+
+da_peaks_mt_Wilcox <- da_peaks_mt_Wilcox %>% rownames_to_column(var = "Granges")
+
+write_xlsx(x = da_peaks_mt_Wilcox, path = "C:/Users/parrilla/Desktop/Bioinformatics/scATAC/PCA_seurat/results/da_peaks_mt_Wilcox.xlsx")
+
+```
+
+```{r}
+da_peaks_DE_mt_wilcox <- subset(da_peaks_mt_Wilcox, abs(avg_log2FC) > 1 & p_val_adj < 0.05)
+```
+
+```{r}
+ego_mt_wilcox <- enrichGO(gene          = da_peaks_DE_mt_wilcox$closest_gene,
+                OrgDb         = 'org.Hs.eg.db',
+                ont           = "BP",
+                keyType       = "SYMBOL",
+                pAdjustMethod = "BH",   
+                qvalueCutoff  = 0.05,
+                readable      = TRUE)
+
+dotplot(ego_mt_wilcox, showCategory=10)+
+  theme(axis.text.y = element_text(size = 10))
+```
+
+Volcano PLot
+```{r}
+# Label DA peaks
+da_peaks_mt_Wilcox <- da_peaks_mt_Wilcox %>%
+  mutate(diffexpressed = case_when(
+    avg_log2FC > 1 & p_val_adj < 0.05  ~ "Up",
+    avg_log2FC < -1 & p_val_adj < 0.05 ~ "Down",
+    TRUE                                ~ "No"
+  ))
+
+
+#subset(da_peaks_DE, p_val_adj < 0.05 & abs(avg_log2FC) >1)$closest_gene
+top_genes <- head(da_peaks_mt_Wilcox$closest_gene[order(da_peaks_mt_Wilcox$p_val_adj)], 30)
+da_peaks_mt_Wilcox$delabel <- ifelse(da_peaks_mt_Wilcox$closest_gene %in% top_genes, da_peaks_mt_Wilcox$closest_gene, NA)
+
+
+```
+
+```{r}
+ggplot(data = da_peaks_mt_Wilcox, aes(x = avg_log2FC, y = -log10(p_val_adj), 
+                                      col = diffexpressed, label = delabel)) +
+  geom_vline(xintercept = c(-1, 1), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') + 
+  geom_point(size = 2)+
+  scale_color_manual(values = c("#00AFBB", "grey", "#bb0c00"), 
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  labs(color = '', 
+       x = expression("log"[2]*"FC"), y = expression("-log"[10]*"p-value adj"))+
+  geom_text_repel(max.overlaps = 15)
+```
+
+# Peak accessibility by gene across mt mutations
+```{r}
+DefaultAssay(data_ATAC) <- 'peaks'
+
+#region_highlight<-(StringToGRanges(da_peaks$Granges[17]))
+
+# Check for gene name
+grep("B3GAT1",data_ATAC@assays$peaks@annotation$gene_name,value = TRUE)
+
+region_gene <- subsetByOverlaps(StringToGRanges(da_peaks_DE_mt_wilcox$Granges), LookupGeneCoords(data_ATAC, "KMT2E"))
+
+CoveragePlot(
+  object = data_ATAC,
+  region = region_gene,
+  #extend.upstream = 12000,
+  #extend.downstream = 2000,
+  region.highlight = region_gene,
+  group.by = "mt.mutation"
+)
+```
+
+Plotting a specific gene
+```{r}
+plot1 <- VlnPlot(
+  object = data_ATAC,
+  features = GRangesToString(region_gene),
+  group.by = "dataset"
+)
+plot2 <- FeaturePlot(
+  object = data_ATAC,
+  reduction = "umap.harm",
+  features = GRangesToString(region_gene),
+  max.cutoff = 'q95'
+)
+
+plot1 | plot2
+```
+
+# Comparing mtmutations only in old donors-----
+
+```{r}
+dta_old <- subset(data, dataset %in% c("pbmcO1", "pbmcO2", "pbmcO3", "pbmcO4"))
+```
+
+```{r}
+DimPlot(dta_old, 
+        reduction = 'umap.harm',
+        split.by = "dataset",
+        group.by = "mt.mutation",
+        ncol = 4,
+        pt.size = 0.5,
+        cols = c("lightgrey", "darkred"),
+        na.value = "lightgrey"
+) + 
+  labs(x= "UMAP.1", y= "UMAP.2")+
+  ggtitle('Informative mtDNA mutations') +
+  theme(panel.spacing = unit(2, "lines"),  
+        strip.text.x = element_text(size = 12), 
+        axis.line.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.line.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_text(face = "bold", margin =  margin(0,20,0,0)),
+        axis.title.x = element_text(face = "bold", margin =  margin(0,20,0,0)),
+        plot.title = element_text(hjust = 0.5, margin =  margin(0,0,20,0))
+        )
+```
+
+LR test
+```{r}
+# DA peaks using LR method
+DefaultAssay(dta_old) <- 'peaks'
+
+Idents(dta_old) <- "mt.mutation"
+
+da_peaks_mt_old_LR <- FindMarkers(
+  object = dta_old,
+  ident.1 = "TRUE",  
+  ident.2 = "FALSE",
+  min.pct = 0.05,   
+  test.use = "LR",  
+  latent.vars = "peak_region_fragments"  
+)
+```
+
+```{r}
+closest_genes_mt_old_LR <- ClosestFeature(dta_old, regions = rownames(da_peaks_mt_old_LR))
+
+da_peaks_mt_old_LR <- da_peaks_mt_old_LR[rownames(da_peaks_mt_old_LR) %in% closest_genes_mt_old_LR$query_region, ]
+
+da_peaks_mt_old_LR$closest_gene <- closest_genes_mt_old_LR$gene_name
+da_peaks_mt_old_LR$distance <- closest_genes_mt_old_LR$distance
+da_peaks_mt_old_LR$type <- closest_genes_mt_old_LR$type
+
+da_peaks_mt_old_LR <- da_peaks_mt_old_LR %>% rownames_to_column(var = "Granges")
+
+write_xlsx(x = da_peaks_mt_old_LR, path = "C:/Users/parrilla/Desktop/Bioinformatics/scATAC/PCA_seurat/results/da_peaks_mt_old_LR.xlsx")
+
+```
+
+```{r}
+da_peaks_DE_mt_old_LR <- subset(da_peaks_mt_old_LR, abs(avg_log2FC) > 0 & p_val_adj < 0.05)
+```
+
+```{r}
+ego_mt_old_LR <- enrichGO(gene          = da_peaks_DE_mt_old_LR$closest_gene,
+                OrgDb         = 'org.Hs.eg.db',
+                ont           = "BP",
+                keyType       = "SYMBOL",
+                pAdjustMethod = "BH",   
+                qvalueCutoff  = 0.05,
+                readable      = TRUE)
+
+dotplot(ego_mt_old_LR, showCategory=10)+
+  theme(axis.text.y = element_text(size = 10))
+```
+
+
+Volcano PLot
+
+```{r}
+theme_set(theme_classic(base_size = 20) +
+            theme(
+              axis.title.y = element_text(face = "bold", margin = margin(0,20,0,0), size = rel(1.1), color = 'black'),
+              axis.title.x = element_text(hjust = 0.5, face = "bold", margin = margin(20,0,0,0), size = rel(1.1), color = 'black'),
+              plot.title = element_text(hjust = 0.5)
+            ))
+```
+
+
+```{r}
+# Label DA peaks
+da_peaks_mt_old_LR <- da_peaks_mt_old_LR %>%
+  mutate(diffexpressed = case_when(
+    avg_log2FC > 0.5 & p_val_adj < 0.05  ~ "Up",
+    avg_log2FC < -0.5 & p_val_adj < 0.05 ~ "Down",
+    TRUE                                ~ "No"
+  ))
+
+
+#subset(da_peaks_DE, p_val_adj < 0.05 & abs(avg_log2FC) >1)$closest_gene
+top_genes <- head(da_peaks_mt_old_LR$closest_gene[order(da_peaks_mt_old_LR$p_val_adj)], 30)
+da_peaks_mt_old_LR$delabel <- ifelse(da_peaks_mt_old_LR$closest_gene %in% top_genes, da_peaks_mt_old_LR$closest_gene, NA)
+
+
+```
+
+```{r}
+ggplot(data = da_peaks_mt_old_LR, aes(x = avg_log2FC, y = -log10(p_val), 
+                                      col = diffexpressed, label = delabel)) +
+  geom_vline(xintercept = c(-0.5, 0.5), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') + 
+  geom_point(size = 2)+
+  scale_color_manual(values = c("#00AFBB", "grey", "#bb0c00"), 
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  labs(color = '', 
+       x = expression("log"[2]*"FC"), y = expression("-log"[10]*"p-value adj"))+
+  geom_text_repel(max.overlaps = 15)
+```
+
+# Pseudo-bulk approach----
+
+```{r}
+pseudo_data_old <- AggregateExpression(dta_old, assays = 'peaks', return.seurat = T, group.by = "mt.mutation")
+```
+
+DSEQ2 test
+```{r}
+library(DESeq2)
+library(Matrix)
+```
+
+```{r}
+DefaultAssay(dta_old) <- "peaks"
+
+counts_matrix <- GetAssayData(dta_old, assay = 'peaks', layer = "counts")
+col_data <- data.frame(condition = dta_old$mt.mutation)
+col_data <- col_data[!is.na(col_data$condition), , drop = FALSE]
+counts_matrix <- counts_matrix[, rownames(col_data)]
+counts_matrix <- as(counts_matrix, "dgCMatrix")
+
+```
+
+```{r}
+# Convert to DESeq2 dataset
+dds <- DESeqDataSetFromMatrix(
+  countData = counts_matrix,
+  colData = col_data,
+  design = ~ condition
+)
+```
+
+```{r}
+dds <- DESeq(dds)
+results_deseq <- results(dds)
+```
+Is not possible to run DSEQ2...
+
+
+
